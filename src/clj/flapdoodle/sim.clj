@@ -136,10 +136,72 @@
         interposed (interpose (str \newline) state-strings)]
     (apply str interposed)))
 
-(defn rightmost-bit-set
+(defn lsb
+  "least significant bit"
+  [n]
+  (bit-and n 1))
+
+(defn lsb-set
   "Whether the rightmost bit of a number is set"
   [n]
-  (= 1 (bit-and n 1)))
+  (= 1 (lsb n)))
+
+(defn microstate-number
+  "A bit of a funny name for this and it may change.  Basically when
+  we're looking at a bunch of states but we're doing an operation on
+  only one or more bits, we need to isolate all the cases where those
+  bits have discrete 'microstates' (for example, for one bit |0> and
+  |1>) but *all other bits* in the QC's qubits are the same.  This can
+  be done by taking a state index and shifting each bit of the number
+  by the offset of each bit.
+
+  Here, `bits` is a sequence of bits MSB->LSB and n is the 'microstate'
+  number"
+  [bits microstate]
+  (loop [rbits (reverse bits)
+         ms microstate
+         result 0]
+    (if (empty? rbits)
+      result
+      (recur (rest rbits)
+             (bit-shift-right ms 1)
+             (bit-or result (bit-shift-left (lsb ms) (first rbits)))))))
+
+(defn apply-matrix-to-states
+  "applies an arbitrary matrix to the specified states in the qubits
+  vector.  Typically you will not call this directly, instead
+  applying the matrix to bits (see `apply-matrix-to-bits`"
+  [qubits states mat]
+  (let [this-vec (sel/sel qubits states)
+        result (m/inner-product mat this-vec)]
+    (sel/set-sel! qubits states result)
+    qubits))
+
+(defn microstates
+  "Calculates the sets of 'microstates' necessary for applying a
+  matrix to a set of bits in a qubit vector"
+  [num-qubits bits]
+  (let [all-bits (reverse (range num-qubits))
+        offset-bits (remove #(contains? (set bits) %) all-bits)
+        num-offsets (math/expt 2 (count offset-bits))
+        offsets (map #(microstate-number offset-bits %) (range num-offsets))
+        num-microstates (math/expt 2 (count bits))
+        microstates (map #(microstate-number bits %) (range num-microstates))
+        all-microstates (map (fn [offset] (map (fn [x] (+ offset x)) microstates)) offsets)]
+    all-microstates))
+
+(defn apply-matrix-to-bits
+  "Applies an arbitrary square matrix to the specified bits in the
+  qubits vector"
+  [qubits bits mat]
+  (let [num-qubits (num-bits-in-qubits qubits)
+        all-microstates (microstates num-qubits bits)]
+    (reduce (fn [qbs mstate] (apply-matrix-to-states qbs mstate mat)) qubits all-microstates)
+    ))
+
+(def g (ground-state 2))
+(apply-matrix-to-bits g [0] H-mat)
+(apply-matrix-to-bits g [0 1] CNOT-mat)
 
 (defn bit-pairs
   "Generates all the state numbers representing the 'pairs' of a bit in a 0 or 1 state.
@@ -149,8 +211,8 @@
   bit 1 are [(0,2) (1,3)]"
   [num-states bit-index]
   (let [all-states (range num-states)
-        ups (filter #(not (rightmost-bit-set (bit-shift-right % bit-index))) all-states)
-        downs (filter #(rightmost-bit-set (bit-shift-right % bit-index)) all-states)]
+        ups (filter #(not (lsb-set (bit-shift-right % bit-index))) all-states)
+        downs (filter #(lsb-set (bit-shift-right % bit-index)) all-states)]
     (map vector ups downs)))
 
 (defn apply-bitwise-matrix
@@ -190,6 +252,19 @@
                       [1 -1]])
    (/ 1 (math/sqrt 2))))
 
+(def S-mat
+  "Swap"
+  (cm/complex-array [[1 0 0 0]
+                     [0 0 1 0]
+                     [0 1 0 0]
+                     [0 0 0 1]]))
+
+(def CNOT-mat
+  "Controlled-NOT"
+  (cm/complex-array [[1 0 0 0]
+                     [0 1 0 0]
+                     [0 0 0 1]
+                     [0 0 1 0]]))
 
 ;; more scratch code
 (m/inner-product X-mat (ground-state 1))
