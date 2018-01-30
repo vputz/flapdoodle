@@ -1,2 +1,2 @@
-(ns core)
+(ns flapdoodle.core)
 

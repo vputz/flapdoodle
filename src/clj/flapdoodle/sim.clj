@@ -1,4 +1,4 @@
-(ns sim
+(ns flapdoodle.sim
   (:require
    [complex.core :as c]
    [clojure.core.matrix.complex :as cm]
@@ -7,7 +7,10 @@
    [clojure.core.matrix.selection :as sel]
    [clojure.math.numeric-tower :as math]
    [clojure.pprint :as pp]
-   )
+   [clojure.spec.alpha :as s]
+   [clojure.string :as str]
+   [clojure.set :as set])
+  (:import [org.apache.commons.math3.complex Complex])
   )
 
                                         ; we don't actually use this
@@ -53,6 +56,19 @@
 
 (defrecord Sim [bindings states])
 
+(defn equal-qubits
+  "whether the two qubit arrays represent essentially the same thing.
+  Shouldn't be necessary but evidently is given we're using an ndarray
+  implementation for complex numbers"
+  ([a b] (equal-qubits a b 0.000001))
+  ([a b eps]
+   (every?
+    identity
+    (mapv (fn [alpha beta]
+            (Complex/equals ^Complex alpha ^Complex beta ^double eps))
+          (m/eseq a)
+          (m/eseq b)))))
+
 ;; ## Creating and manipulating a ground state
 
 (defn ground-state
@@ -69,6 +85,52 @@
                      (map vector real-parts imag-parts)))
         ]
     result))
+
+
+
+(defn contains-only
+  "Determines whether a string contains only the given set of characters"
+  [char-set s]
+  (set/subset? (set (apply vector s)) char-set)
+  )
+
+(defn bracketed-by
+  "Determines whether a string is bracketed by a pair of strings"
+  [l r s]
+  (and (str/starts-with? s l)
+       (str/ends-with? s r)))
+
+(defn middle-string
+  "The 'middle' of a string, without the given delimiters"
+  [l r s]
+  (subs s (count l) (- (count s) (count r)))
+  )
+
+
+;; A ket-string is a textual representation of a quantum state.  In this case
+;; it's an initialization string, like a known state.  For example, '|000>'
+;; represents the ground state of a three-bit machine, known to be in the
+;; state where all bits are 0
+(s/def ::ket-string (s/and string?
+                          #(contains-only #{\0 \1} (middle-string "|" ">" %))
+                          #(bracketed-by "|" ">" %)))
+
+(defn from-ket
+  "Creates a qubit vector from a string representing a 'ket' vector,
+  such as |01> or |10>, of arbitrary length and with all amplitudes
+  zero except the described state.  For example, creating a string of
+  qubits from the ket vector |10> would result in a length of four
+  possible states, with state 2 (binary 10) having amplitude 1.0"
+  [s]
+  (let [ket-string (s/conform ::ket-string s)
+        bits-string (middle-string "|" ">" ket-string)
+        num-bits (count bits-string)
+        active-state (read-string (str "2r" bits-string))
+        result (ground-state num-bits)]
+    (m/mset! result 0 (c/complex 0 0))
+    (m/mset! result active-state (c/complex 1 0))
+    result)
+  )
 
 (defn num-states
   "The number of states represented by a qubit string (just the number of possible states)"
@@ -96,8 +158,11 @@
 ;;
 ;;```
 ;;|00> 0.50 @ 00
+
 ;;|01> 0.00 @ 00
+
 ;;|10> 0.00 @ 00
+
 ;;|11> 0.50 @ 00
 ;;```
 
@@ -146,20 +211,20 @@
   [n]
   (= 1 (lsb n)))
 
-(defn microstate-number
+(defn substate-number
   "A bit of a funny name for this and it may change.  Basically when
   we're looking at a bunch of states but we're doing an operation on
   only one or more bits, we need to isolate all the cases where those
-  bits have discrete 'microstates' (for example, for one bit |0> and
+  bits have discrete 'substates' (for example, for one bit |0> and
   |1>) but *all other bits* in the QC's qubits are the same.  This can
   be done by taking a state index and shifting each bit of the number
   by the offset of each bit.
 
-  Here, `bits` is a sequence of bits MSB->LSB and n is the 'microstate'
+  Here, `bits` is a sequence of bits MSB->LSB and n is the 'substate'
   number"
-  [bits microstate]
+  [bits substate]
   (loop [rbits (reverse bits)
-         ms microstate
+         ms substate
          result 0]
     (if (empty? rbits)
       result
@@ -170,105 +235,73 @@
 (defn apply-matrix-to-states
   "applies an arbitrary matrix to the specified states in the qubits
   vector.  Typically you will not call this directly, instead
-  applying the matrix to bits (see `apply-matrix-to-bits`"
+  applying the matrix to bits (see `apply-matrix-to-bits`)"
   [qubits states mat]
   (let [this-vec (sel/sel qubits states)
         result (m/inner-product mat this-vec)]
     (sel/set-sel! qubits states result)
     qubits))
 
-(defn microstates
-  "Calculates the sets of 'microstates' necessary for applying a
+(defn substates
+  "Calculates the sets of 'substates' necessary for applying a
   matrix to a set of bits in a qubit vector"
   [num-qubits bits]
   (let [all-bits (reverse (range num-qubits))
         offset-bits (remove #(contains? (set bits) %) all-bits)
         num-offsets (math/expt 2 (count offset-bits))
-        offsets (map #(microstate-number offset-bits %) (range num-offsets))
-        num-microstates (math/expt 2 (count bits))
-        microstates (map #(microstate-number bits %) (range num-microstates))
-        all-microstates (map (fn [offset] (map (fn [x] (+ offset x)) microstates)) offsets)]
-    all-microstates))
+        offsets (map #(substate-number offset-bits %) (range num-offsets))
+        num-substates (math/expt 2 (count bits))
+        substates (map #(substate-number bits %) (range num-substates))
+        all-substates (map (fn [offset] (map (fn [x] (+ offset x)) substates)) offsets)]
+    all-substates))
 
 (defn apply-matrix-to-bits
   "Applies an arbitrary square matrix to the specified bits in the
   qubits vector"
   [qubits bits mat]
   (let [num-qubits (num-bits-in-qubits qubits)
-        all-microstates (microstates num-qubits bits)]
-    (reduce (fn [qbs mstate] (apply-matrix-to-states qbs mstate mat)) qubits all-microstates)
+        all-substates (substates num-qubits bits)]
+    (reduce (fn [qbs mstate] (apply-matrix-to-states qbs mstate mat)) qubits all-substates)
     ))
 
-(def g (ground-state 2))
-(apply-matrix-to-bits g [0] H-mat)
-(apply-matrix-to-bits g [0 1] CNOT-mat)
-
-(defn bit-pairs
-  "Generates all the state numbers representing the 'pairs' of a bit in a 0 or 1 state.
-  In each element of such a pair, all the other bits are identical.
-  For example, in a two bit system (|00>, |01>, |10>, |11>), the
-  `bit-pairs` for bit 0 are [(0,1) (2,3)] while the `bit-pairs` for
-  bit 1 are [(0,2) (1,3)]"
-  [num-states bit-index]
-  (let [all-states (range num-states)
-        ups (filter #(not (lsb-set (bit-shift-right % bit-index))) all-states)
-        downs (filter #(lsb-set (bit-shift-right % bit-index)) all-states)]
-    (map vector ups downs)))
-
-(defn apply-bitwise-matrix
-  "applies a bitwise (2x2) matrix to the bit number; 0 is the LSB"
-  [qubits bit-index mat]
-  (let [n (num-states qubits)
-        pairs (bit-pairs n bit-index)]
-    (loop [pair (first pairs)
-           remain (rest pairs)]
-      (let [this-vec (sel/sel qubits pair)
-            result (m/inner-product mat this-vec)]
-        (sel/set-sel! qubits pair result)
-        (if (empty? remain)
-          qubits
-          (recur (first remain) (rest remain)))))))
-
 ;; # Basic operators
+
+
 (def X-mat
-  "NOT"
+  "NOT (Pauli-X) gate"
   (cm/complex-array [[0 1]
                      [1 0]]))
 
 (def Y-mat
+  "Pauli-Y gate"
   (cm/complex-array [[0 0]
                      [0 0]]
                     [[0 -1]
                      [1 0]]))
 
 (def Z-mat
+  "Pauli-Z gate"
   (cm/complex-array [[1 0]
                      [0 -1]]))
 
 (def H-mat
-  "Hadamard"
+  "Hadamard gate"
   (m/scale
    (cm/complex-array [[1 1]
                       [1 -1]])
    (/ 1 (math/sqrt 2))))
 
 (def S-mat
-  "Swap"
+  "Swap gate"
   (cm/complex-array [[1 0 0 0]
                      [0 0 1 0]
                      [0 1 0 0]
                      [0 0 0 1]]))
 
 (def CNOT-mat
-  "Controlled-NOT"
+  "Controlled-NOT gate"
   (cm/complex-array [[1 0 0 0]
                      [0 1 0 0]
                      [0 0 0 1]
                      [0 0 1 0]]))
 
-;; more scratch code
-(m/inner-product X-mat (ground-state 1))
-(def g (ground-state 2))
-(qubits-prob-state-string g)
-(apply-bitwise-matrix g 0 H-mat)
-(bit-pairs (ground-state 2) 0)

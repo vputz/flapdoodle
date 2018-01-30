@@ -1,8 +1,9 @@
 (set-env!
- :resource-paths #{"src"} ; "html"
+ :source-paths #{"src/clj" "test"} ; "html"
  :checkouts '[[core.matrix.complex "0.0.1-SNAPSHOT"]; [apache-commons-matrix "0.3.0-SNAPSHOT"]
               ]
  :dependencies '[;[adzerk/boot-cljs            "1.7.48-5"      :scope "test"]
+                 [adzerk/boot-test "1.2.0" :scope "test"]
                                         ;[adzerk/boot-cljs-repl       "0.3.3"          :scope "test"]
                                         ;[adzerk/boot-reload          "0.5.1"          :scope "test"]
                                         ;[pandeiro/boot-http          "0.7.6" :scope "test"]
@@ -35,6 +36,7 @@
                                         ;  '[adzerk.boot-cljs-repl :refer [cljs-repl start-repl]]
                                         ;  '[adzerk.boot-reload    :refer [reload]]
                                         ;  '[crisptrutski.boot-cljs-test  :refer [exit! test-cljs]]
+ '[adzerk.boot-test :refer :all]
  '[tolitius.boot-check :as check]
  '[it.frbracch.boot-marginalia :refer [marginalia]]
                                         ;  '[pandeiro.boot-http    :refer [serve]]
@@ -59,12 +61,6 @@
                                         ;(cljs-repl)
                                         ;(cljs :source-map true :optimizations :none)
    ))
-
-(deftask test []
-  (comp (testing)
-                                        ;(test-cljs)
-                                        ;        (exit!)
-        ))
 
 
 (swap! boot.repl/*default-dependencies*
