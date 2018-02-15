@@ -6,7 +6,6 @@
    [clojure.math.numeric-tower :as math])
   (:import [clojure.core.matrix.complex ComplexArray]))
 
-(m/shape (cm/complex-array [[1 2] [3 4]]))
 
 (s/def ::mat (s/and #(instance? ComplexArray %)
                    square-matrix?))
