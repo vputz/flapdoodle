@@ -14,10 +14,41 @@
 ;; parameterized arguments (for the case of rotations).  Any gate will only work
 ;; on the same number of bits (we'll rely on currying to do e.g. multiple applications
 ;; of a Hadamard
-(defmacro defgate [gate bits]
-  `(do (defn ~gate [bit#]
-         (list (keyword gate) bit#))))
+(defmacro defgate [gate nbits]
+  "Create an unparameterized gate, such as H, CNOT, SWAP, up to 3 bits, usable as (H 0) or (H qvar)"
+  (cond
+    (= nbits 1)
+    `(do (defn ~gate [bit#]
+           (list ~(keyword gate) bit#)))
+    (= nbits 2)
+    `(do (defn ~gate [bit1# bit2#]
+           (list ~(keyword gate) bit1# bit2#)))
+    (= nbits 3)
+    `(do (defn ~gate [bit1# bit2# bit3#]
+           (list ~(keyword gate) bit1# bit2#)))))
 
+(defmacro defparmgate [gate nbits]
+  "Create a parameterized gate, such as Rx, etc; usable as ((Rx (/ pi 2)) 0) "
+  `(do (defn ~gate [param#]
+         (cond
+           (= ~nbits 1)
+           (fn [bit#]
+             (list (list ~(keyword gate) param#) bit#))
+           (= ~nbits 2)
+           (fn [bit1# bit2#]
+             (list (list ~(keyword gate) param#) bit1# bit2#))))))
+
+(defmacro defq [&form &env name & fdecl])
+(defq testq)
 ;; this works as a basic def of a gate returning a list of (:gate bit-num)
-(defn H [bit]
-  (list (keyword 'H) bit))
+(defgate H 1)
+(defgate CNOT 2)
+(defparmgate Rx 1)
+
+(defn bellpair [b1 b2]
+  (list 
+   (H b1)
+   (repeat 5 (H b1))
+   (CNOT b1 b2)))
+
+
