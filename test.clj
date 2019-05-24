@@ -48,7 +48,12 @@
 (defparmgate Rx 1)
 
 (defn bellpair [b1 b2]
-  (H b1)
-  (repeat 5 (H b1))
-  (CNOT b1 b2))
+  [(H b1)
+   (repeat 5 (H b1))
+   (CNOT b1 b2)])
 
+(defmacro qcomp [form]
+  `(do
+     (reset! code-atom [])
+     (eval ~form)
+     @code-atom))
